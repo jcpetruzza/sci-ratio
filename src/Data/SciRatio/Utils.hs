@@ -3,7 +3,8 @@ Stability: experimental
 
 -}
 module Data.SciRatio.Utils where
-import Control.Applicative ((<*>), (*>), (<$>), (<$))
+import Control.Monad (ap)
+import Data.Functor ((<$), (<$>))
 import Data.Char (isAlpha, isDigit)
 import Data.Ratio (denominator, numerator)
 import Data.SciRatio (SciRatio, expPart, largestDivisiblePower, ratioPart)
@@ -52,7 +53,7 @@ pDigit = P.satisfy isDigit
 pSigned :: Num a =>
            ReadP a                      -- ^ Parser for the number.
         -> ReadP a
-pSigned = ((*) <$> (sign <++ return 1) <*>)
+pSigned p = fmap (*) (sign <++ return 1) `ap` p
   where sign = do
           c <- P.get
           case c of
@@ -100,13 +101,13 @@ pDecimal = pSigned pUnsignedDecimal
 -- | Parse an exponent in scientific notation.  Accepts a
 --   'pDecimalExponentSymbol' followed by an 'pInteger'.
 pSciExponent :: Num a => ReadP a
-pSciExponent = pDecimalExponentSymbol *> pInteger
+pSciExponent = pDecimalExponentSymbol >> pInteger
 
 -- | Parse an unsigned scientific decimal fraction.  Equivalent to
 --   an 'pUnsignedDecimal' optionally followed by a 'pSciExponent'.
 pUnsignedSciDecimal :: Fractional a => ReadP a
 pUnsignedSciDecimal =
-  (*) <$> pDecimal <*> (pow10 <$> pSciExponent <++ return 0)
+  fmap (*) pDecimal `ap` fmap pow10 (pSciExponent <++ return 0)
   where pow10 = (10 ^^) :: Fractional a => Integer -> a
 
 -- | Parse a (signed) scientific decimal fraction.  Accepts a 'pSigned'
@@ -118,7 +119,7 @@ pSciDecimal = pSigned pUnsignedSciDecimal
 pRatio :: Fractional a =>
           ReadP a               -- ^ Parser for the numerator and denominator.
        -> ReadP a
-pRatio p = (/) <$> p <*> (pFractionSeparator *> p) <++ return 1
+pRatio p = fmap (/) p `ap` ((pFractionSeparator >> p) <++ return 1)
 
 -- | Parse a 'pRatio' of 'pInteger's.
 pIntegerRatio :: Fractional a => ReadP a
@@ -138,9 +139,9 @@ pSciDecimalRatio = pRatio pSciDecimal
 pNaturalBOH_ :: Num a => ReadP a
 pNaturalBOH_ =
   fromInteger <$> P.choice
-  [ P.string "0x" *> P.readS_to_P readHex
-  , P.string "0o" *> P.readS_to_P readOct
-  , P.string "0b" *> P.readS_to_P readBin ]
+  [ P.string "0x" >> P.readS_to_P readHex
+  , P.string "0o" >> P.readS_to_P readOct
+  , P.string "0b" >> P.readS_to_P readBin ]
 
 -- | Parse a natural number in either binary, octal, decimal, or hexadecimal
 --   format.  See 'pNaturalBOH_' for details on accepted formats.
