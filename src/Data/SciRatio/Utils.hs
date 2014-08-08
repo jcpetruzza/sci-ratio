@@ -7,7 +7,7 @@ import Control.Monad (ap)
 import Data.Functor ((<$), (<$>))
 import Data.Char (isAlpha, isDigit)
 import Data.Ratio (denominator, numerator)
-import Data.SciRatio (SciRatio, expPart, largestDivisiblePower, ratioPart)
+import Data.SciRatio (SciRatio, expPart, ratioPart)
 import Numeric (readDec, readHex, readInt, readOct, showIntAtBase)
 import Text.ParserCombinators.ReadP (ReadP, (<++))
 import qualified Text.ParserCombinators.ReadP as P
@@ -170,38 +170,31 @@ parseNumber s = case P.readP_to_S pNumber s of
 
 -- | Pretty-print the number in the format accepted by 'parseNumber'.
 prettyNumber :: (Real a, Integral b) => SciRatio a b -> String
-prettyNumber num = case d of
-  1 -> if abs e <= toInteger (length ns) -- e might be extremely large
-       then shorter fixed floating
-       else floating
-       where ns = show n
-             fixed = moveDot (-e) ns
-             floating = ns ++ showExponent e
-  _ -> case largestDivisiblePower 2 d of
-    (1, f) -> decimalOrFraction (f, 5)
-    _      -> case largestDivisiblePower 5 d of
-      (1, f) -> decimalOrFraction (f, 2)
-      _      -> fraction
-  where r = toRational (ratioPart num)
-        e = toInteger (expPart num)
-        n = numerator r
-        d = denominator r
-        showExponent p = if p == 0 then "" else "e" ++ show p
-        fraction       = show n ++ showExponent e ++ "/" ++ show d
-        decimalOrFraction w = shorter (decimal w) fraction
+prettyNumber num =
+  let r = toRational (ratioPart num)
+      e = toInteger (expPart num)
+      n = numerator r
+      d = denominator r in
+  -- canonicity ensures that the divisor is not a multiple of 2 nor 5
+  case d of
+    1 -> decimal n e
+    _ -> fraction n e d
+  where showI = show :: Integer -> String
+        showExponent 0 = ""
+        showExponent p = "e" ++ showI p
+        fraction n e d = decimal n e ++ "/" ++ showI d
 
         -- | Render the decimal form of a number.
-        decimal (f, b) =
-          if abs (f - e) <= nsLen       -- e might be extremely large
+        decimal n e =
+          if abs e <= 2 * nsLen         -- e might be extremely large
           then shorter fixed floating
           else floating
-          where fixed    = addSign (moveDot (f - e) ns)
+          where ns       = showI (abs n)
+                nsLen    = toInteger (length ns)
+                e'       = e + nsLen - 1
+                fixed    = addSign (moveDot (-e) ns)
                 floating = addSign (moveDot (nsLen - 1) ns ++ showExponent e')
-                addSign = if signum n' == -1 then ('-' :) else id
-                n' = n * b ^ f
-                e' = e - f + nsLen - 1
-                ns = show (abs n')
-                nsLen = toInteger (length ns)
+                addSign  = if signum n == -1 then ('-' :) else id
 
         -- | Choose the shorter string, preferring the left string.
         shorter s s' = if length s' < length s then s' else s
