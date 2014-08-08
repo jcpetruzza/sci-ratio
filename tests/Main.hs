@@ -1,8 +1,9 @@
 module Main where
 import Data.IORef
+import System.Exit
+import qualified Text.ParserCombinators.ReadP as P
 import Data.SciRatio
 import Data.SciRatio.Utils
-import System.Exit
 
 testCases :: [String]
 testCases =
@@ -34,11 +35,10 @@ testCases =
   , "-0.002397/338792e+9999999990"
   ]
 
-parseNumberT :: (Fractional a, Real a, Integral b, Monad m) =>
-                String -> m (SciRatio a b)
-parseNumberT s = case parseNumber s of
-  Nothing -> error $ "can't parse: " ++ s
-  Just x  -> return x
+parseNumberT :: String -> IO SciRational
+parseNumberT s = case P.readP_to_S pNumber s of
+  [(x, [])] -> return x
+  r         -> error $ "can't parse: " ++ s ++ " (" ++ show r ++ ")"
 
 main :: IO ()
 main = do
@@ -56,15 +56,13 @@ main = do
     else passTest $ "5 == recip (1 / 5)"
 
   (`mapM_` testCases) $ \ s -> do
-    x <- parseNumberT s
+    x  <- parseNumberT s
     let s' = prettyNumber (x :: SciRational)
-    case parseNumber s' of
-      Nothing -> failTest $ "can't parse prettied result: " ++ s'
-      Just x' ->
-        if x' /= x
-        then failTest $ "prettied result (" ++ show x' ++
-             ") not equal to original (" ++ show x ++ ")"
-        else passTest $ s ++ " ==> " ++ s'
+    x' <- parseNumberT s'
+    if x' /= x
+      then failTest $ "prettied result (" ++ show x' ++
+                    ") not equal to original (" ++ show x ++ ")"
+      else passTest $ s ++ " ==> " ++ s'
 
   failCount <- readIORef failCounter
   if failCount > 0 then exitFailure else exitSuccess
