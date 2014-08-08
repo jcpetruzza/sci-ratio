@@ -1,9 +1,59 @@
 module Main where
-import Data.IORef
+import Control.Applicative
+  ( Applicative((<*>), pure)
+  , Alternative((<|>), empty) )
+import Control.Monad
+  ( ap, MonadPlus(mplus, mzero) )
 import System.Exit
 import qualified Text.ParserCombinators.ReadP as P
 import Data.SciRatio
 import Data.SciRatio.Utils
+
+data TestState
+  = TestState
+    { failCount :: Int }
+
+initTestState
+  = TestState
+    { failCount = 0 }
+
+newtype Test a = Test { runTest :: TestState -> IO (a, TestState) }
+
+instance Functor Test where
+  fmap f u = return f `ap` u
+
+instance Applicative Test where
+  pure  = return
+  (<*>) = ap
+
+instance Monad Test where
+  return x     = Test $ \ s -> return (x, s)
+  Test f >>= u = Test $ \ s -> do
+    (x, s') <- f s
+    runTest (u x) s'
+  fail s       = failTest "aborted" >> fail s
+
+failTest :: String -> Test ()
+failTest s = do
+  liftIO . putStrLn $ "*** FAIL: " ++ s
+  s <- getTestState
+  let TestState { failCount = n } = s
+  putTestState s { failCount = n + 1 }
+
+passTest :: String -> Test ()
+passTest s =
+  liftIO . putStrLn $ "ok" ++ if null s then "" else " (" ++ s ++ ")"
+
+liftIO :: IO a -> Test a
+liftIO m = Test $ \ s -> do
+  x <- m
+  return (x, s)
+
+getTestState :: Test TestState
+getTestState = Test $ \ s -> return (s, s)
+
+putTestState :: TestState -> Test ()
+putTestState s = Test $ \ _ -> return ((), s)
 
 testCases :: [String]
 testCases =
@@ -37,34 +87,33 @@ testCases =
   , "-0.002397/338792e+9999999990"
   ]
 
-parseNumberT :: String -> IO SciRational
+parseNumberT :: String -> Either String SciRational
 parseNumberT s = case P.readP_to_S pNumber s of
-  [(x, [])] -> return x
-  r         -> error $ "can't parse: " ++ s ++ " (" ++ show r ++ ")"
+  [(x, [])] -> Right x
+  r         -> Left $ "can't parse: " ++ s ++ " (" ++ show r ++ ")"
 
-main :: IO ()
-main = do
-  failCounter <- newIORef (0 :: Int)
-  let failTest s = do
-        putStrLn $ "*** FAIL: " ++ s
-        modifyIORef failCounter (+ 1)
-      passTest s = if null s
-             then putStrLn $ "ok"
-             else putStrLn $ "ok (" ++ s ++ ")"
+test :: Test ()
+test = do
 
   -- recip must recanonicalize the number otherwise this test would fail
   if 5 /= recip (1 / 5 :: SciRational)
-    then failTest $ "5 /= recip (1 / 5)"
-    else passTest $ "5 == recip (1 / 5)"
+    then failTest "5 /= recip (1 / 5)"
+    else passTest "5 == recip (1 / 5)"
 
-  (`mapM_` testCases) $ \ s -> do
-    x  <- parseNumberT s
-    let s' = prettyNumber (x :: SciRational)
-    x' <- parseNumberT s'
-    if x' /= x
-      then failTest $ "prettied result (" ++ show x' ++
-                    ") not equal to original (" ++ show x ++ ")"
-      else passTest $ s ++ " ==> " ++ s'
+  (`mapM_` testCases) $ \ s ->
+    case parseNumberT s of
+      Left e -> failTest e
+      Right x ->
+        let s' = prettyNumber (x :: SciRational) in
+        case parseNumberT s' of
+          Left e -> failTest e
+          Right x' ->
+            if x' /= x
+            then failTest $ "prettied result (" ++ show x' ++
+                            ") not equal to original (" ++ show x ++ ")"
+            else passTest $ s ++ " ==> " ++ s'
 
-  failCount <- readIORef failCounter
-  if failCount > 0 then exitFailure else exitSuccess
+main :: IO ()
+main = do
+  ((), TestState { failCount = n }) <- runTest test initTestState
+  if n > 0 then exitFailure else exitSuccess
