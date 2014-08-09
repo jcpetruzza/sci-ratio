@@ -13,9 +13,13 @@ extremely large exponents without issues, although *performing arithmetic* on
 them, however, is not guaranteed to work in some cases (e.g. adding numbers
 with wildly differing exponents).
 
-Numbers are parsed and pretty-printed in a format similar to:
+Numbers are parsed in a format similar to:
 
-    +0.000e+00/1.000
+    +0.000e+00/+1.000e+00
+
+They are pretty-printed in a format similar to:
+
+    +0.000e+00/1
 
 The sign, decimal point, exponent, and denominator are all optional.
 
