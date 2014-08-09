@@ -150,43 +150,57 @@ parseNumber s = case P.readP_to_S pNumber s of
 
 -- | Pretty-print the number in the format accepted by 'parseNumber'.
 prettyNumber :: (Real a, Integral b) => SciRatio a b -> String
-prettyNumber num =
+prettyNumber num = prettysNumber num ""
+
+prettysNumber :: (Real a, Integral b) => SciRatio a b -> ShowS
+prettysNumber num =
   let r = toRational (ratioPart num)
       e = toInteger (expPart num)
       n = numerator r
       d = denominator r in
   -- canonicity ensures that the divisor is not a multiple of 2 nor 5
   case d of
-    1 -> decimal n e
-    _ -> fraction n e d
-  where showI = show :: Integer -> String
-        showExponent 0 = ""
-        showExponent p = "e" ++ showI p
-        fraction n e d = decimal n e ++ "/" ++ showI d
+    1 -> prettysDecimal n e
+    _ -> prettysFraction n e d
 
-        -- | Render the decimal form of a number.
-        decimal n e =
-          if abs e <= 2 * nsLen         -- e might be extremely large
-          then shorter fixed floating
-          else floating
-          where ns       = showI (abs n)
-                nsLen    = toInteger (length ns)
-                e'       = e + nsLen - 1
-                fixed    = addSign (moveDot (-e) ns)
-                floating = addSign (moveDot (nsLen - 1) ns ++ showExponent e')
-                addSign  = if signum n == -1 then ('-' :) else id
+prettysExponent :: Integer -> ShowS
+prettysExponent 0 = showString ""
+prettysExponent p = showString "e" . showsInteger p
 
-        -- | Choose the shorter string, preferring the left string.
-        shorter s s' = if length s' < length s then s' else s
-        moveDot i = reverse . stripDot . insertDot i . reverse
-          where stripDot ('.' : l) = l
-                stripDot l         = l
+prettysFraction :: Integer -> Integer -> Integer -> ShowS
+prettysFraction n e d = prettysDecimal n e . showString "/" . showsInteger d
 
-        -- | Insert a decimal point at the given position relative to the
-        --   beginning, padding with zeros as necessary
-        insertDot i l = case compare i 0 of
-          GT -> case l of
-            []     -> '0' : insertDot (pred i) l
-            x : xs ->  x  : insertDot (pred i) xs
-          EQ -> '.' : l
-          LT -> insertDot (succ i) ('0' : l)
+showsInteger :: Integer -> ShowS
+showsInteger = shows
+
+-- | Choose the shorter string, preferring the left string.
+shorter :: ShowS -> ShowS -> ShowS
+shorter s s' = if length (s' "") < length (s "") then s' else s
+
+moveDot :: Integer -> ShowS -> ShowS
+moveDot i s = showString $ reverse . stripDot . insertDot i . reverse $ s ""
+  where stripDot ('.' : l) = l
+        stripDot l         = l
+
+-- | Insert a decimal point at the given position relative to the
+--   beginning, padding with zeros as necessary
+insertDot :: Integer -> String -> String
+insertDot i s = case compare i 0 of
+  GT -> case s of
+    []     -> '0' : insertDot (pred i) s
+    x : xs ->  x  : insertDot (pred i) xs
+  EQ -> '.' : s
+  LT -> insertDot (succ i) ('0' : s)
+
+-- | Render the decimal form of a number.
+prettysDecimal :: Integer -> Integer -> ShowS
+prettysDecimal n e =
+  if abs e <= 2 * nsLen                 -- e might be extremely large
+  then shorter fixed floating
+  else floating
+  where ns       = showsInteger (abs n)
+        nsLen    = fromIntegral (length (ns ""))
+        e'       = e + nsLen - 1
+        fixed    = addSign . moveDot (-e) ns
+        floating = addSign . moveDot (nsLen - 1) ns . prettysExponent e'
+        addSign  = if signum n == -1 then ('-' :) else id
