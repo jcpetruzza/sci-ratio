@@ -44,6 +44,10 @@ passTest :: String -> Test ()
 passTest s =
   liftIO . putStrLn $ "ok" ++ if null s then "" else " (" ++ s ++ ")"
 
+expect :: String -> Bool -> Test ()
+expect s False = failTest s
+expect s True  = passTest s
+
 liftIO :: IO a -> Test a
 liftIO m = Test $ \ s -> do
   x <- m
@@ -87,31 +91,56 @@ testCases =
   , "-0.002397/338792e+9999999990"
   ]
 
-parseNumberT :: String -> Either String SciRational
-parseNumberT s = case P.readP_to_S pNumber s of
-  [(x, [])] -> Right x
-  r         -> Left $ "can't parse: " ++ s ++ " (" ++ show r ++ ")"
+parseNumberT :: String -> (SciRational -> Test ()) -> Test ()
+parseNumberT s f = case P.readP_to_S pNumber s of
+  [(x, [])] -> f x
+  r         -> failTest $ "can't parse: " ++ s ++ " (" ++ show r ++ ")"
+
+-- | Tests the comparison operation in both directions.
+testOrd :: String -> Ordering -> String -> Test ()
+testOrd s ordering s' =
+  parseNumberT s  $ \ x  ->
+  parseNumberT s' $ \ x' -> do
+  expect (s ++ " " ++ show ordering ++ " " ++ s') $
+         compare x x' == ordering
+  expect (s' ++ " " ++ show ordering' ++ " " ++ s) $
+         compare x' x == ordering'
+  where invert GT = LT
+        invert EQ = EQ
+        invert LT = GT
+        ordering' = invert ordering
 
 test :: Test ()
 test = do
 
   -- recip must recanonicalize the number otherwise this test would fail
-  if 5 /= recip (1 / 5 :: SciRational)
-    then failTest "5 /= recip (1 / 5)"
-    else passTest "5 == recip (1 / 5)"
+  expect "5 == recip (1 / 5)" $
+          5 == recip (1 / 5 :: SciRational)
+
+  -- comparison tests
+  testOrd "0" EQ "0"
+  testOrd "0" LT "1"
+  testOrd "0" GT "-1"
+  testOrd "-5e2" LT "400"
+  testOrd "5e2" GT "400"
+  testOrd "3.5e99999" GT "-2"
+  testOrd "-3.5e99999" LT "2"
+  testOrd "-3.5e-99999" LT "2"
+  testOrd "3.5e99999" EQ "3.5e99999"
+  testOrd "-3.5e99999" LT "3.5e99999"
+  testOrd "-3.5e99999" EQ "-3.5e99999"
+  testOrd "-3.5e99999" LT "-2.5e99999"
+  testOrd "3.5e99999" GT "2.5e99999"
+  testOrd "3.5e99999" GT "0"
 
   (`mapM_` testCases) $ \ s ->
-    case parseNumberT s of
-      Left e -> failTest e
-      Right x ->
-        let s' = prettyNumber (x :: SciRational) in
-        case parseNumberT s' of
-          Left e -> failTest e
-          Right x' ->
-            if x' /= x
-            then failTest $ "prettied result (" ++ show x' ++
-                            ") not equal to original (" ++ show x ++ ")"
-            else passTest $ s ++ " ==> " ++ s'
+    parseNumberT s $ \ x ->
+    let s' = prettyNumber (x :: SciRational) in
+    parseNumberT s' $ \ x' ->
+    if x' /= x
+    then failTest $ "prettied result (" ++ show x' ++
+                    ") not equal to original (" ++ show x ++ ")"
+    else passTest $ s ++ " ==> " ++ s'
 
 main :: IO ()
 main = do
