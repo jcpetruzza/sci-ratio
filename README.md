@@ -19,8 +19,11 @@ Numbers are parsed and pretty-printed in a format similar to:
 
 The sign, decimal point, exponent, and denominator are all optional.
 
+Documentation can be found [here][doc].
+
 Take note of the [versioning policy of this package][pvp].
 
 [ca]:  https://travis-ci.org/Rufflewind/sci-ratio
 [ci]:  https://travis-ci.org/Rufflewind/sci-ratio.svg?branch=master
+[doc]: http://rufflewind.com/sci-ratio
 [pvp]: https://gist.github.com/Rufflewind/03f4e03f7cfa52b8f07d
