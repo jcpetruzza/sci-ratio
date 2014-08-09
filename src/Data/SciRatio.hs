@@ -38,6 +38,9 @@ infixl 1 ~~
 --   a rational number factorized into a product of prime numbers with
 --   /integer/ exponents.)
 --
+--   __Note__: if inputs differ greatly in magnitude, @('+')@ and @('-')@ can
+--             be quite slow: both time and space complexity are linear with
+--             the absolute difference of the exponents.
 data SciRatio a b = !a :^ !b deriving Eq
 
 -- | A specialization of 'SciRatio'.
@@ -170,10 +173,12 @@ x :^ a ~~ y :^ b = (x * 10 ^^ (a - c), y * 10 ^^ (b - c), c)
 
 -- | Extract the largest power of the given base that divides the input
 --   integer.  Returns the significand and exponent, satisfying:
---   @input_integer = significand * base ^ exponent@.  If the input integer is
---   zero, then zeros are returned.
+--   @input_integer = significand * base ^ exponent@.
 --
---   This is equivalent to computing the floored logarithm and its associated
+--     * If the input integer is zero, then zeros are returned.
+--     * If the input integer is negative, the significand is negative.
+--
+--   This is similar to computing the floored logarithm and its associated
 --   remainder.
 intLog :: (Integral a, Integral b) =>
           a                             -- ^ base
