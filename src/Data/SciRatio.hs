@@ -1,6 +1,5 @@
 {-
 Stability: experimental
-
 -}
 module Data.SciRatio
     (

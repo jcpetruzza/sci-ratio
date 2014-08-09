@@ -1,8 +1,14 @@
 {-
 Stability: experimental
-
 -}
-module Data.SciRatio.Utils where
+module Data.SciRatio.Utils
+       ( parseNumber
+       , prettyNumber
+       , pNumber
+       , isBinDigit
+       , readBin
+       , showBin
+       ) where
 import Control.Monad (ap, mzero)
 import Data.Char (isAlpha, isDigit, toLower)
 import Data.Ratio (denominator, numerator)
@@ -123,15 +129,6 @@ pNaturalBOH_ =
   , char' 'b' >> P.readS_to_P readBin ]
   where char' x = P.satisfy $ \ c -> toLower c == toLower x
 
--- | Parse a natural number in either binary, octal, decimal, or hexadecimal
---   format.  See @'pNaturalBOH_'@ for details on accepted formats.
-pNaturalBOH :: Num a => ReadP a
-pNaturalBOH = do
-  string <- P.look
-  if hasRadixPrefix string
-    then pNaturalBOH_
-    else pNatural
-
 -- | Parse the most general number format: either @'naturalBOH_'@ or
 --   @'pRatio pSciDecimal'@.
 pNumber :: Fractional a => ReadP a
@@ -141,16 +138,19 @@ pNumber = do
     then pNaturalBOH_
     else pRatio pSciDecimal
 
--- | Parse the string using the @'pNumber'@ parser.
-parseNumber :: (Fractional a, Real a, Integral b) =>
-               String -> Maybe (SciRatio a b)
-parseNumber s = case P.readP_to_S pNumber s of
+runReadPFull :: ReadP a -> String -> Maybe a
+runReadPFull p s = case P.readP_to_S p s of
   [(x, [])] -> Just x
   _         -> Nothing
 
 -- | Pretty-print the number in the format accepted by 'parseNumber'.
 prettyNumber :: (Real a, Integral b) => SciRatio a b -> String
 prettyNumber num = prettysNumber num ""
+
+-- | Parse a generic, rational number.
+parseNumber :: (Fractional a, Real a, Integral b) =>
+               String -> Maybe (SciRatio a b)
+parseNumber = runReadPFull pNumber
 
 prettysNumber :: (Real a, Integral b) => SciRatio a b -> ShowS
 prettysNumber num =
