@@ -62,6 +62,7 @@ putTestState s = Test $ \ _ -> return ((), s)
 testCases :: [String]
 testCases =
   [ "0"
+  , "0e0"
   , "-00"
   , "-.0000"
   , "-.01"

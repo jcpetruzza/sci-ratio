@@ -198,6 +198,7 @@ intLog base = go 0 1 0
 --   of the base as possible.
 canonicalize :: (Fractional a, Real a, Integral b) =>
                 SciRatio a b -> SciRatio a b
+canonicalize (0 :^ _) = 0 :^ 0
 canonicalize (r :^ e) =
   let r' = toRational r in
   case (intLog 10 (numerator r'), intLog 2 (denominator r')) of

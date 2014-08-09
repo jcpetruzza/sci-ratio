@@ -10,17 +10,12 @@ module Data.SciRatio.Utils
        , showBin
        ) where
 import Control.Monad (ap, mzero)
-import Data.Char (isAlpha, isDigit, toLower)
+import Data.Char (isDigit, toLower)
 import Data.Ratio (denominator, numerator)
 import Data.SciRatio (SciRatio, expPart, ratioPart)
 import Numeric (readDec, readHex, readInt, readOct, showIntAtBase)
 import Text.ParserCombinators.ReadP (ReadP, (<++))
 import qualified Text.ParserCombinators.ReadP as P
-
--- | Whether the string begins with a prefix indicating its radix (e.g. @0x@).
-hasRadixPrefix :: String -> Bool
-hasRadixPrefix ('0' : c : _) = isAlpha c
-hasRadixPrefix _             = False
 
 -- | Convert a binary literal into a positive number.  The result is
 --   undefined if the input is not a valid binary literal.
@@ -132,11 +127,7 @@ pNaturalBOH_ =
 -- | Parse the most general number format: either @'naturalBOH_'@ or
 --   @'pRatio pSciDecimal'@.
 pNumber :: Fractional a => ReadP a
-pNumber = do
-  string <- P.look
-  if hasRadixPrefix string
-    then pNaturalBOH_
-    else pRatio pSciDecimal
+pNumber = pNaturalBOH_ <++ pRatio pSciDecimal
 
 runReadPFull :: ReadP a -> String -> Maybe a
 runReadPFull p s = case P.readP_to_S p s of
