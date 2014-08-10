@@ -1,20 +1,24 @@
-{-
-Stability: experimental
--}
+{-| Stability: experimental -}
 module Data.SciRatio
     (
       -- * The 'SciRatio' type
       SciRatio
     , SciRational
     , (.^)
-    , ratioPart
-    , expPart
+    , fracSignificand
+    , base10Exponent
+
+      -- * Specialized functions
+    , (^!)
+    , (^^!)
+    , fromSciRatio
 
       -- * Miscellaneous utilities
     , intLog
     ) where
 import Data.Ratio ((%), denominator, numerator)
 import Data.Hashable (Hashable(hashWithSalt))
+infixr 8 ^!, ^^!
 infixl 7 :^, .^
 infixl 1 ~~
 
@@ -22,23 +26,40 @@ infixl 1 ~~
 -- don't use :^ directly unless you're absolutely sure it will stay canonical
 -- (use .^ instead if you're unsure).
 
--- | Represents a floating ratio: a product of a fractional significand and an
---   integral power of 10.
+-- | Represents a fractional number stored in scientific notation: a product
+--   of a fractional significand and an integral power of 10.
 --
---   - The significand has type @a@ and should be both 'Fractional' and
---     'Real'.
+--   - The significand has type @a@ and should be both @'Fractional'@ and
+--     @'Real'@.  Although this could be a floating-point type, it is not
+--     recommended as floating-points use inexact arithmetic and strange bugs
+--     will occur as a result.
 --
---   - The exponent has type @b@ and should be 'Integral'.
+--   - The exponent has type @b@ and should be @'Integral'@.
 --
---   The number is always in a unique, canonical form: the significand shall
---   never contain factors of 2 and 5 simultaneously, and their multiplicities
---   shall always be nonnegative.  (Note that here we treat the significand as
---   a rational number factorized into a product of prime numbers with
---   /integer/ exponents.)
+--   @'SciRatio'@ behaves in the same way as an ordinary @'Data.Ratio.Ratio'@
+--   and supports the same operations.  The main property is that it is moxre
+--   efficient than @'Data.Ratio.Ratio'@ when the exponent is large:
 --
---   __Note__: if inputs differ greatly in magnitude, @('+')@ and @('-')@ can
---             be quite slow: both time and space complexity are linear with
---             the absolute difference of the exponents.
+--   >>> read "(5 % 1) .^ 99999999" :: SciRational   -- works fine
+--   >>> 5e99999999                 :: Rational      -- takes forever
+--
+--   Specialized functions are provided in cases where they can be implemented
+--   more efficiently than the default implementation.
+--
+--   The number is always stored in a unique, canonical form: the significand
+--   shall never contain factors of 2 and 5 simultaneously, and their
+--   multiplicities shall always be nonnegative.  (Note that here we treat the
+--   significand as a rational number factorized into a product of prime
+--   numbers with /integral/ exponents.)
+--
+--   __Note__: If inputs differ greatly in magnitude, @('+')@ and @('-')@ can
+--             be quite slow: complexity is linear with the absolute
+--             difference of the exponents.  Furthermore, the complexity of
+--             @'toRational'@ is linear with the magnitude of the exponent.
+--             These also apply to any functions that indirectly use these
+--             operations (including all operations in @'RealFrac'@ and
+--             @'Enum'@).
+--
 data SciRatio a b = !a :^ !b deriving Eq
 
 -- | A specialization of 'SciRatio'.
@@ -98,7 +119,7 @@ instance (Fractional a, Real a, Integral b) => Num (SciRatio a b) where
   x :^ a * (y :^ b) =    x * y .^ (a + b)
   abs      (y :^ b) =    abs y :^ b
   negate   (y :^ b) = negate y :^ b
-  signum            = (:^ 0) . signum . ratioPart
+  signum            = (:^ 0) . signum . fracSignificand
   fromInteger       = (.^ 0) . fromInteger
 
 instance (Fractional a, Real a, Integral b) => Fractional (SciRatio a b) where
@@ -113,7 +134,7 @@ instance (Fractional a, Real a, Integral b) => Real (SciRatio a b) where
 
 instance (Fractional a, Real a, Integral b) => RealFrac (SciRatio a b) where
   {-# SPECIALIZE instance RealFrac SciRational #-}
-  properFraction q = (\(n, p) -> (n, fromRational p))
+  properFraction q = (\ (n, p) -> (n, fromRational p))
                      . properFraction $ toRational q
 
 instance (Fractional a, Real a, Integral b) => Enum (SciRatio a b) where
@@ -133,11 +154,11 @@ instance (Fractional a, Real a, Integral b) => Enum (SciRatio a b) where
                        . enumFromThenTo (toRational x) (toRational y)
                        . toRational
 
--- | Precedence of the (.^) operator.
+-- | Precedence of the @('.^')@ operator.
 prec :: Int
 prec = 7
 
--- | Construct a floating ratio such that
+-- | Construct a number such that
 --   @significand .^ exponent == significand * 10 ^^ exponent@.
 {-# SPECIALISE (.^) :: Rational -> Integer -> SciRational #-}
 (.^) :: (Fractional a, Real a, Integral b) =>
@@ -146,23 +167,39 @@ prec = 7
      -> SciRatio a b
 x .^ y = canonicalize $ x :^ y
 
--- | Extract the significand (ratio part).
-ratioPart :: SciRatio a b -> a
-ratioPart (x :^ _) = x
+-- | Extract the fractional significand.
+fracSignificand :: SciRatio a b -> a
+fracSignificand (x :^ _) = x
 
--- | Extract the exponent.
-expPart :: SciRatio a b -> b
-expPart (_ :^ x) = x
+-- | Extract the base-10 exponent.
+base10Exponent :: SciRatio a b -> b
+base10Exponent (_ :^ x) = x
 
--- | Convert a floating ratio into a 'Fractional' number.
+-- | Convert into a 'Fractional' number.
+--
+--   This is similar to 'realToFrac' but much more efficient for large
+--   exponents.
+{-# RULES "realToFrac/fromSciRational"
+            forall (x :: SciRational) . realToFrac x = fromSciRatio x;
+          "realToFrac/SciRational"
+            realToFrac = id :: SciRational -> SciRational;
+          "fromSciRatio/SciRational"
+            fromSciRatio = id #-}
+{-# NOINLINE [1] fromSciRatio #-}
 fromSciRatio :: (Real a, Integral b, Fractional c) => SciRatio a b -> c
 fromSciRatio (x :^ y) = realToFrac x * 10 ^^ y
 
-{-# RULES
-    "realToFrac/fromSciRatio[SciRational]"
-      forall (x :: SciRational) .
-      realToFrac x = fromSciRatio x
-  #-}
+-- | Specialized, more efficient version of @('^^')@.
+{-# RULES "(^^)/SciRational" forall (x :: SciRational) . (^^) x = (^^!) x #-}
+(^^!) :: (Fractional a, Real a, Integral b, Integral c) =>
+         SciRatio a b -> c -> SciRatio a b
+(x :^ a) ^^! b = x ^^ b :^ (a * fromIntegral b)
+
+-- | Specialized, more efficient version of @('^')@.
+{-# RULES "(^)/SciRational" forall (x :: SciRational) . (^) x = (^!) x #-}
+(^!) :: (Real a, Integral b, Integral c) =>
+        SciRatio a b -> c -> SciRatio a b
+(x :^ a) ^! b = x ^ b :^ (a * fromIntegral b)
 
 -- | Matches the exponents.
 (~~) :: (Fractional a, Integral b) => SciRatio a b -> SciRatio a b -> (a, a, b)
@@ -171,7 +208,8 @@ x :^ a ~~ y :^ b = (x * 10 ^^ (a - c), y * 10 ^^ (b - c), c)
 
 -- | Extract the largest power of the given base that divides the input
 --   integer.  Returns the significand and exponent, satisfying:
---   @input_integer = significand * base ^ exponent@.
+--
+--   > input_integer = significand * base ^ exponent
 --
 --     * If the input integer is zero, then zeros are returned.
 --     * If the input integer is negative, the significand is negative.
@@ -194,8 +232,8 @@ intLog base = go 0 1 0
                 next'  = if maxe == 0 then next * 2 else maxe `div` 2
                 next'' = next `div` 2
 
--- | Convert a 'SciRatio' into canonical form by factoring out as many powers
---   of the base as possible.
+-- | Convert into canonical form by removing all factors of 2 and 5 from the
+--   denominator and factoring out as many powers of the base as possible.
 canonicalize :: (Fractional a, Real a, Integral b) =>
                 SciRatio a b -> SciRatio a b
 canonicalize (0 :^ _) = 0 :^ 0

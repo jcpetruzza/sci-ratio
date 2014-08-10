@@ -1,18 +1,25 @@
 module Main where
-import Control.Applicative
-  ( Applicative((<*>), pure)
-  , Alternative((<|>), empty) )
-import Control.Monad
-  ( ap, MonadPlus(mplus, mzero) )
-import System.Exit
+import Control.Applicative (Applicative((<*>), pure))
+import Control.Monad (ap)
+import Data.Ratio ((%))
+import System.Exit (exitFailure, exitSuccess)
+import System.IO (hPutStrLn, stderr)
+import System.Timeout (timeout)
+import Text.Printf (printf)
 import qualified Text.ParserCombinators.ReadP as P
 import Data.SciRatio
-import Data.SciRatio.Utils
+import Data.SciRatio.Read
+import Data.SciRatio.Show
+
+-- | Whether output should be suppressed.
+quiet :: Bool
+quiet = True
 
 data TestState
   = TestState
     { failCount :: Int }
 
+initTestState :: TestState
 initTestState
   = TestState
     { failCount = 0 }
@@ -35,14 +42,16 @@ instance Monad Test where
 
 failTest :: String -> Test ()
 failTest s = do
-  liftIO . putStrLn $ "*** FAIL: " ++ s
+  liftIO . hPutStrLn stderr $ "*** FAIL: " ++ s
   s <- getTestState
   let TestState { failCount = n } = s
   putTestState s { failCount = n + 1 }
 
 passTest :: String -> Test ()
 passTest s =
-  liftIO . putStrLn $ "ok" ++ if null s then "" else " (" ++ s ++ ")"
+  if quiet
+  then return ()
+  else liftIO . putStrLn $ "ok" ++ if null s then "" else printf " (%s)" s
 
 expect :: String -> Bool -> Test ()
 expect s False = failTest s
@@ -59,57 +68,102 @@ getTestState = Test $ \ s -> return (s, s)
 putTestState :: TestState -> Test ()
 putTestState s = Test $ \ _ -> return ((), s)
 
-testCases :: [String]
+-- | Set a time limit for a test (in seconds).
+timeoutT :: Double -> String -> Test () -> Test ()
+timeoutT t n m = Test $ \ s -> do
+  result <- timeout (round (t * 1e6)) (runTest m s)
+  case result of
+    Just (x, s) -> return (x, s)
+    Nothing     -> runTest (failTest ("timed out: " ++ n)) s
+
+testCases :: [(String, SciRational)]
 testCases =
-  [ "0"
-  , "0e0"
-  , "-00"
-  , "-.0000"
-  , "-.01"
-  , ".00008"
-  , "1"
-  , "+1"
-  , "-1"
-  , "1."
-  , "-1."
-  , "+1."
-  , "3/5"
-  , "5e20/5"
-  , "1/3"
-  , "-2/3"
-  , "-2000/3"
-  , "37e-200/125"
-  , "-1/2"
-  , "2e1"
-  , "1e2"
-  , "1e-3"
-  , "-.48e+1/.39"
-  , "-2.14e+1/17"
-  , "-.3e+1/17"
-  , "-2.e+1/17"
-  , "3.14e-17"
-  , "0.23456e-99999990"
-  , "-0.002397/338792e+9999999990"
+  [ ("0", -0.0e+3)
+  , ("25", 0.25e+2)
+  , ("-.1", -1.0e-1)
+  , ("2.5e20/3", 5.0e+20 / 6)
+  , ("-0.0e+3", (0 % 1) .^ 0)
+  , ("0.25e+2", (25 % 1) .^ 0)
+  , ("-1.0e-1", ((-1) % 1) .^ (-1))
+  , ("5.0e+20/6.e0", (25 % 3) .^ 19)
+  , ("0xfeedface", 4277009102)
+  , ("0xfeedface", 0xfeedface)
+  , ("0e0", 0)
+  , ("-00", 0)
+  , ("-.0000", 0)
+  , ("-.01", -0.01)
+  , (".00008", 0.00008)
+  , ("1", 1)
+  , ("+1", 1)
+  , ("-1", -1)
+  , ("1.", 1)
+  , ("-1.", -1)
+  , ("+1.", 1)
+  , ("3/5", 3 / 5)
+  , ("5e20/5", 5e20 / 5)
+  , ("1/3", 1 / 3)
+  , ("-2/3", -2 / 3)
+  , ("-2000/3", -2000 / 3)
+  , ("-2000/-3", -2000 / (-3))
+  , ("-2000/-3.e3", -2000 / (-3e3))
+  , ("37e-25/125", 37e-25 / 125)
+  , ("-1/2", -1 / 2)
+  , ("2e1", 2e1)
+  , ("1e2", 1e2)
+  , ("1e-3", 1e-3)
+  , ("-.48e+1/.39", -0.48e1 / 0.39)
+  , ("-2.14e+1/17", -2.14e1 / 17)
+  , ("-.3e+1/17", -0.3e1 / 17)
+  , ("-2.e+1/17", -2e1 / 17)
+  , ("3.14e-17", 3.14e-17)
+  , ("0xfFed90", 0xfFed90)
+  , ("0o013573", 0o013573)
+  , ("0b1001101", 77)
   ]
 
-parseNumberT :: String -> (SciRational -> Test ()) -> Test ()
-parseNumberT s f = case P.readP_to_S pNumber s of
+testCasesExtreme :: [(String, SciRational)]
+testCasesExtreme =
+  [ ("1e99999999", (1 % 1) .^ 99999999)
+  , ("37e-200/125", 37 / 125 .^ (-200))
+  , ("0.23456e-99999999", 0.23456 .^ (-99999999))
+  , ("-0.002397/338792e-9999999999", -0.002397 / 338792 .^ 9999999999)
+  ]
+
+readSciRationalT :: String -> (SciRational -> Test ()) -> Test ()
+readSciRationalT s f = case P.readP_to_S readSciRationalP s of
   [(x, [])] -> f x
-  r         -> failTest $ "can't parse: " ++ s ++ " (" ++ show r ++ ")"
+  r         -> failTest $ printf "can't parse: %s (%s)" s (show r)
 
 -- | Tests the comparison operation in both directions.
 testOrd :: String -> Ordering -> String -> Test ()
 testOrd s ordering s' =
-  parseNumberT s  $ \ x  ->
-  parseNumberT s' $ \ x' -> do
-  expect (s ++ " " ++ show ordering ++ " " ++ s') $
+  readSciRationalT s  $ \ x  ->
+  readSciRationalT s' $ \ x' -> do
+  expect (printf "%s %s %s" s  (show ordering)  s') $
          compare x x' == ordering
-  expect (s' ++ " " ++ show ordering' ++ " " ++ s) $
+  expect (printf "%s %s %s" s' (show ordering') s)  $
          compare x' x == ordering'
   where invert GT = LT
         invert EQ = EQ
         invert LT = GT
         ordering' = invert ordering
+
+testShowRead :: String -> SciRational -> Test ()
+testShowRead s x =
+  let s' = showNumber x in
+  readSciRationalT s' $ \ x' ->
+  if x' == x
+  then passTest $ printf "%s ==> %s" s s'
+  else failTest $ printf "shown result (%s) not equal to original (%s)"
+                         (show x') (show x)
+
+testReadShowRead :: (String, SciRational) -> Test ()
+testReadShowRead (s, y) =
+  readSciRationalT s $ \ x ->
+  if x == y
+  then testShowRead s x
+  else failTest $ printf "parsed result (%s) not equal to expected (%s): %s"
+                         (show x) (show y) s
 
 test :: Test ()
 test = do
@@ -134,14 +188,8 @@ test = do
   testOrd "3.5e99999" GT "2.5e99999"
   testOrd "3.5e99999" GT "0"
 
-  (`mapM_` testCases) $ \ s ->
-    parseNumberT s $ \ x ->
-    let s' = prettyNumber (x :: SciRational) in
-    parseNumberT s' $ \ x' ->
-    if x' /= x
-    then failTest $ "prettied result (" ++ show x' ++
-                    ") not equal to original (" ++ show x ++ ")"
-    else passTest $ s ++ " ==> " ++ s'
+  mapM_ testReadShowRead testCases
+  timeoutT 5 "testCasesExtreme" $ mapM_ testReadShowRead testCasesExtreme
 
 main :: IO ()
 main = do
