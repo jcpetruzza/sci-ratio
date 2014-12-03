@@ -102,9 +102,17 @@ instance (Real a, Integral b, Ord a) => Ord (SciRatio a b) where
             -- initial comparison via integer logs to handle easy cases where
             -- exponents are wildly different
             ((lremM, ilogM), (lremN, ilogN)) ->
-              case compare 0 (b - a + ilogN - ilogM) of
+             let digitsM = 1 + imLog 10 lremM
+                 digitsN = 1 + imLog 10 lremN
+             in
+              case compare 0 ( b - a
+                             + ilogN - ilogM
+                             + fromInteger digitsN - fromInteger digitsM ) of
                 -- compare directly when the int logs alone aren't enough
-                EQ -> compare lremM lremN
+                EQ -> case compare digitsM digitsN of
+                        EQ -> compare lremM lremN
+                        LT -> compare (lremM * 10 ^ (digitsN - digitsM)) lremN
+                        GT -> compare lremM (lremN * 10 ^ (digitsM - digitsN))
                 k  -> k
 
 instance (Hashable a, Hashable b) => Hashable (SciRatio a b) where
@@ -231,6 +239,19 @@ intLog base = go 0 1 0
                 maxe'  = if maxe == 0 then maxe     else maxe - next
                 next'  = if maxe == 0 then next * 2 else maxe `div` 2
                 next'' = next `div` 2
+
+-- | Integer log base (c.f. Haskell report 14.4):
+imLog :: Integral a => a ->a -> a
+imLog b n
+  = if n < b then
+      0
+    else
+     let
+       l = 2 * imLog (b*b) n
+     in
+       doDiv (n`div`(b^l)) l
+  where
+    doDiv x l = if x < b then l else doDiv (x`div`b) (l+1)
 
 -- | Convert into canonical form by removing all factors of 2 and 5 from the
 --   denominator and factoring out as many powers of the base as possible.
